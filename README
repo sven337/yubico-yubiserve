@@ -1,3 +1,12 @@
+JPosse Notes
+============
+This is a forked project from the original yubiserve. The only real change
+from the standard version 3.1 is that it adds support for sqlite3 for 
+modern OSes which no longer have the original sqlite python libs avail
+(ie. Mac OSX, Ubuntu 12.04, etc). 
+
+As a result, the dbconf.py, yubiserve.py and yubikeys.sqlite files have changed 
+
 Author & Version
 ================
 
