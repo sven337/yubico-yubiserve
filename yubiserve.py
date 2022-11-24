@@ -1,6 +1,6 @@
 #!/usr/bin/python
 import re, os, time, socket
-import urlparse, SocketServer, urllib, BaseHTTPServer
+import urllib.parse, socketserver, urllib.request, urllib.parse, urllib.error, http.server
 from Crypto.Cipher import AES
 from OpenSSL import SSL
 import hmac, hashlib
@@ -14,6 +14,12 @@ try:
 	import sqlite3
 except ImportError:
 	pass
+
+import codecs
+decode_hex = codecs.getdecoder("hex_codec")
+import base64
+
+from http.server import BaseHTTPRequestHandler
 
 def parseConfigFile():	# Originally I wrote this function to parse PHP configuration files!
 	config = open(os.path.dirname(os.path.realpath(__file__)) + '/yubiserve.cfg', 'r').read().splitlines()
@@ -78,7 +84,7 @@ class OTPValidation():
 			if pos > -1:
 				retVal += hex[pos]
 			else:
-				raise Exception, '"' + string[i] + '": Character is not a valid hex string'
+				raise Exception('"' + string[i] + '": Character is not a valid hex string')
 		return retVal
 	def CRC(self):
 		crc = 0xffff;
@@ -94,7 +100,9 @@ class OTPValidation():
 	def isCRCValid(self):
 		return (self.crc == 0xf0b8)
 	def aes128ecb_decrypt(self, aeskey, aesdata):
-		return AES.new(aeskey.decode('hex'), AES.MODE_ECB).decrypt(aesdata.decode('hex')).encode('hex')
+		aeskey = decode_hex(aeskey)[0]
+		aesdata = decode_hex(aesdata)[0]
+		return AES.new(aeskey, AES.MODE_ECB).decrypt(aesdata).hex()
 	def getResult(self):
 		return self.validationResult
 	def getResponse(self):
@@ -145,9 +153,7 @@ class OTPValidation():
 		self.con.commit()
 		return self.validationResult
 
-class YubiServeHandler (BaseHTTPServer.BaseHTTPRequestHandler):
-	__base = BaseHTTPServer.BaseHTTPRequestHandler
-	__base_handle = __base.handle
+class YubiServeHandler (BaseHTTPRequestHandler):
 	server_version = 'Yubiserve/3.0'
 	global config
 	#try:
@@ -163,16 +169,12 @@ class YubiServeHandler (BaseHTTPServer.BaseHTTPRequestHandler):
 		dict = {}
 		for singleValue in qs.split('&'):
 			keyVal = singleValue.split('=')
-			dict[urllib.unquote_plus(keyVal[0])] = urllib.unquote_plus(keyVal[1])
+			dict[urllib.parse.unquote_plus(keyVal[0])] = urllib.parse.unquote_plus(keyVal[1])
 		return dict
-	def setup(self):
-		self.connection = self.request
-		self.rfile = socket._fileobject(self.request, "rb", self.rbufsize)
-		self.wfile = socket._fileobject(self.request, "wb", self.wbufsize)
 	def log_message(self, format, *args):
 		pass
 	def do_GET(self):
-		(scm, netloc, path, params, query, fragment) = urlparse.urlparse(self.path, 'http')
+		(scm, netloc, path, params, query, fragment) = urllib.parse.urlparse(self.path, 'http')
 		if scm != 'http':
 			self.send_error(501, "The server does not support the facility required.")
 			return
@@ -180,12 +182,12 @@ class YubiServeHandler (BaseHTTPServer.BaseHTTPRequestHandler):
 			self.send_response(200)
 			self.send_header('Content-type', 'text/html')
 			self.end_headers()
-			self.wfile.write('<html>')
+			self.wfile.write(bytes('<html>', 'ascii'))
 			# Yubico Yubikey
-			self.wfile.write('Yubico Yubikeys:<br><form action="/wsapi/2.0/verify" method="GET"><input type="text" name="otp"><br><input type="submit"></form><br>')
+			self.wfile.write(bytes('Yubico Yubikeys:<br><form action="/wsapi/2.0/verify" method="GET"><input type="text" name="otp"><br><input type="submit"></form><br>', 'ascii'))
 			# OATH HOTP
-			self.wfile.write('OATH/HOTP tokens:<br><form action="/wsapi/2.0/oathverify" method="GET"><input type="text" name="otp"><br><input type="text" name="publicid"><br><input type="submit"></form>')
-			self.wfile.write('</html>')
+			self.wfile.write(bytes('OATH/HOTP tokens:<br><form action="/wsapi/2.0/oathverify" method="GET"><input type="text" name="otp"><br><input type="text" name="publicid"><br><input type="submit"></form>', 'ascii'))
+			self.wfile.write(bytes('</html>', 'ascii'))
 		elif path == '/wsapi/2.0/verify': # Yubico Yubikey
 			try:
 				if len(query) > 0:
@@ -197,11 +199,11 @@ class YubiServeHandler (BaseHTTPServer.BaseHTTPRequestHandler):
 					self.end_headers()
 					iso_time = time.strftime("%Y-%m-%dT%H:%M:%S")
 					try:
-						result = 't=' + iso_time + '\r\notp=' + getData['otp'] + '\r\nnonce=' + getData['nonce'] + '\r\nsl=100\r\nstatus=' + [k for k, v in otpvalidation.status.iteritems() if v == validation][0] + '\r\n'
-						orderedResult = 'nonce=' + getData['nonce'] + '&otp=' + getData['otp'] + '&sl=100&status=' + [k for k, v in otpvalidation.status.iteritems() if v == validation][0] + '&t=' + iso_time
+						result = 't=' + iso_time + '\r\notp=' + getData['otp'] + '\r\nnonce=' + getData['nonce'] + '\r\nsl=100\r\nstatus=' + [k for k, v in otpvalidation.status.items() if v == validation][0] + '\r\n'
+						orderedResult = 'nonce=' + getData['nonce'] + '&otp=' + getData['otp'] + '&sl=100&status=' + [k for k, v in otpvalidation.status.items() if v == validation][0] + '&t=' + iso_time
 					except KeyError:
-						result = 't=' + iso_time + '\r\notp=' + getData['otp'] + '\r\nnonce=\r\nsl=100\r\nstatus=' + [k for k, v in otpvalidation.status.iteritems() if v == validation][0] + '\r\n'
-						orderedResult = 'nonce=&otp=' + getData['otp'] + 'sl=100&status=' + [k for k, v in otpvalidation.status.iteritems() if v == validation][0] + '&t=' + iso_time
+						result = 't=' + iso_time + '\r\notp=' + getData['otp'] + '\r\nnonce=\r\nsl=100\r\nstatus=' + [k for k, v in otpvalidation.status.items() if v == validation][0] + '\r\n'
+						orderedResult = 'nonce=&otp=' + getData['otp'] + 'sl=100&status=' + [k for k, v in otpvalidation.status.items() if v == validation][0] + '&t=' + iso_time
 					otp_hmac = ''
 					try:
 						if (getData['id'] != None):
@@ -210,12 +212,15 @@ class YubiServeHandler (BaseHTTPServer.BaseHTTPRequestHandler):
 							cur.execute("SELECT secret from apikeys WHERE id = '" + apiID + "'")
 							if cur:
 								api_key = cur.fetchone()[0]
-								otp_hmac = hmac.new(api_key, msg=orderedResult, digestmod=hashlib.sha1).hexdigest().decode('hex').encode('base64').strip()
+								otp_hmac = hmac.new(bytes(api_key, 'ascii'), msg=bytes(orderedResult, 'ascii'), digestmod=hashlib.sha1)
+								otp_hmac = otp_hmac.hexdigest()
+								otp_hmac = decode_hex(otp_hmac)[0]
+								otp_hmac = base64.b64encode(otp_hmac).decode('ascii').strip()
 							else:
 								result = 't=' + iso_time + '\r\notp=' + getData['otp'] + '\r\nstatus=NO_CLIENT\r\n'
 					except KeyError:
 						pass
-					self.wfile.write('h=' + otp_hmac + '\r\n' + result + '\r\n')
+					self.wfile.write(bytes('h=' + otp_hmac + '\r\n' + result + '\r\n', 'ascii'))
 					return
 			except KeyError:
 				pass
@@ -258,7 +263,7 @@ class YubiServeHandler (BaseHTTPServer.BaseHTTPRequestHandler):
 					self.send_header('Content-type', 'text/plain')
 					self.end_headers()
 					iso_time = time.strftime("%Y-%m-%dT%H:%M:%S")
-					result = 'otp=' + getData['otp'] + '\r\nstatus=' + [k for k, v in oathvalidation.status.iteritems() if v == validation][0] + '\r\nt=' + iso_time
+					result = 'otp=' + getData['otp'] + '\r\nstatus=' + [k for k, v in oathvalidation.status.items() if v == validation][0] + '\r\nt=' + iso_time
 					otp_hmac = ''
 					try:
 						if (getData['id'] != None):
@@ -319,9 +324,9 @@ class YubiServeHandler (BaseHTTPServer.BaseHTTPRequestHandler):
 	do_CONNECT	= do_GET
 	do_POST		= do_GET
 
-class SecureHTTPServer(BaseHTTPServer.HTTPServer):
+class SecureHTTPServer(http.server.HTTPServer):
 	def __init__(self, server_address, HandlerClass):
-		BaseHTTPServer.HTTPServer.__init__(self, server_address, HandlerClass)
+		http.server.HTTPServer.__init__(self, server_address, HandlerClass)
 		ctx = SSL.Context(SSL.SSLv23_METHOD)
 		fpem = os.path.dirname(os.path.realpath(__file__)) + '/yubiserve.pem'
 		ctx.use_privatekey_file (fpem)
@@ -330,8 +335,8 @@ class SecureHTTPServer(BaseHTTPServer.HTTPServer):
 		self.server_bind()
 		self.server_activate()
 
-class ThreadingHTTPServer (SocketServer.ThreadingMixIn, BaseHTTPServer.HTTPServer): pass
-class ThreadingHTTPSServer (SocketServer.ThreadingMixIn, SecureHTTPServer): pass
+class ThreadingHTTPServer (socketserver.ThreadingMixIn, http.server.HTTPServer): pass
+class ThreadingHTTPSServer (socketserver.ThreadingMixIn, SecureHTTPServer): pass
 
 try:
 	if MySQLdb != None:
@@ -344,10 +349,10 @@ try:
 except NameError:
 	isThereSqlite = False
 if isThereMysql == isThereSqlite == False:
-	print "Cannot continue without any database support.\nPlease read README.\n\n"
+	print("Cannot continue without any database support.\nPlease read README.\n\n")
 	quit()
 if config['yubiDB'] == 'mysql' and (config['yubiMySQLHost'] == '' or config['yubiMySQLUser'] == '' or config['yubiMySQLPass'] == '' or config['yubiMySQLName'] == ''):
-	print "Cannot continue without any MySQL configuration.\nPlease read README.\n\n"
+	print("Cannot continue without any MySQL configuration.\nPlease read README.\n\n")
 	quit()
 
 yubiserveHTTP = ThreadingHTTPServer((config['yubiserveHOST'], config['yubiservePORT']), YubiServeHandler)
@@ -356,13 +361,13 @@ yubiserveSSL = ThreadingHTTPSServer((config['yubiserveHOST'], config['yubiserveS
 http_thread = Thread(target=yubiserveHTTP.serve_forever)
 ssl_thread = Thread(target=yubiserveSSL.serve_forever)
 
-http_thread.setDaemon(True)
-ssl_thread.setDaemon(True)
+http_thread.daemon = True
+ssl_thread.daemon = True
 
 http_thread.start()
 ssl_thread.start()
 
-print "HTTP Server is running."
+print("HTTP Server is running.")
 
 while 1:
 	time.sleep(1)
